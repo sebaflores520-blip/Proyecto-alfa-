@@ -1,0 +1,218 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<meta name="theme-color" content="#302219">
+<title>Proyecto Alfa — Panadería Flores 1.1</title>
+<style>
+:root{--cream:#fff0d5;--gold:#e9b96e;--ink:#352316;--panel:#4c3324}
+*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#241912;color:var(--cream);font-family:system-ui,-apple-system,Arial;touch-action:none}
+#game{display:block;width:100vw;height:100dvh}
+.hud{position:absolute;top:7px;left:8px;right:8px;display:flex;justify-content:space-between;gap:8px;pointer-events:none;align-items:flex-start}
+.brand,.stats{background:#302219eF;border:1px solid #a77b4b;border-radius:12px;padding:7px 10px;box-shadow:0 3px 10px #0005}
+.brand b{font-size:clamp(14px,3vw,20px);letter-spacing:1px;color:#ffe2ac}.brand small{display:block;color:#d9bd94;font-size:10px}
+.stats{text-align:right;font-size:12px;line-height:1.55}.stats strong{color:#ffe0a0}
+#toast{position:absolute;top:82px;left:50%;transform:translateX(-50%);background:#38271eec;border:1px solid #d2a365;border-radius:10px;padding:7px 12px;max-width:90%;text-align:center;font-size:12px;pointer-events:none;min-height:30px}
+#action{position:absolute;right:12px;bottom:16px;width:min(48vw,245px);min-height:62px;border:2px solid #8b5a2d;border-radius:13px;background:linear-gradient(#ffe0a0,#dfa958);color:#382515;font-size:14px;font-weight:900;box-shadow:0 4px #70421f;padding:8px}
+#action:disabled{opacity:.48;filter:grayscale(.5)}
+#joy{position:absolute;left:15px;bottom:20px;width:132px;height:132px;border:2px solid #f5d9ad99;border-radius:50%;background:#21171188;display:grid;place-items:center}
+#knob{width:53px;height:53px;border-radius:50%;background:linear-gradient(#ffe4b0,#d89b4e);border:3px solid #fff0d0;box-shadow:0 3px 7px #1c120b88;transform:translate(0,0)}
+#hint{position:absolute;left:12px;bottom:4px;font-size:9px;color:#ffe8c5;text-shadow:0 1px 3px #24170f}
+#panel{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:min(92vw,430px);max-height:82dvh;overflow:auto;background:#38271ff5;border:2px solid #bd8b50;border-radius:16px;padding:16px;box-shadow:0 12px 40px #0009;display:none;touch-action:pan-y}
+#panel h2{margin:0 0 8px;color:#ffe0a0}#panel p{font-size:13px;color:#ead6b9}
+.panelrow{display:flex;justify-content:space-between;gap:8px;border-bottom:1px solid #76543a;padding:8px 0;font-size:13px}
+.panelbtn{border:1px solid #a66e35;border-radius:9px;background:#edbd70;color:#382515;font-weight:800;padding:10px;margin:4px 3px;font-size:12px}
+#close{float:right;background:#6e4931;color:white;border:0;border-radius:8px;padding:6px 10px}
+#bottomnav{position:absolute;left:50%;transform:translateX(-50%);bottom:10px;display:flex;gap:5px;pointer-events:auto}
+.navbtn{background:#38271eeF;border:1px solid #bd8b50;color:#ffe7bd;border-radius:8px;padding:7px 9px;font-size:10px;font-weight:800}
+@media(max-height:650px){#joy{width:100px;height:100px}.stats{font-size:10px}#toast{top:60px}#bottomnav{bottom:3px}.navbtn{padding:5px 6px}}
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<div class="hud">
+ <div class="brand"><b>PANADERÍA FLORES</b><small>Proyecto Alfa · Día <span id="day">1</span></small></div>
+ <div class="stats"><div>💰 <strong id="money">$0</strong></div><div>⭐ <strong id="rep">1.0</strong> · 👥 <strong id="customers">0</strong></div><div>⚙️ Horno <strong id="condition">Nivel 1</strong></div></div>
+</div>
+<div id="toast">¡Bienvenido! Prepara, amasa, hornea y vende. Sin averías ni interrupciones.</div>
+<div id="joy"><div id="knob"></div></div><div id="hint">JOYSTICK · WASD / FLECHAS</div>
+<button id="action">ACÉRCATE A UNA ESTACIÓN</button>
+<div id="bottomnav">
+ <button class="navbtn" data-panel="inventory">📦 BODEGA</button>
+ <button class="navbtn" data-panel="shop">🛠 MEJORAS</button>
+ <button class="navbtn" data-panel="stats">📊 NEGOCIO</button>
+ <button class="navbtn" id="saveBtn">💾 GUARDAR</button>
+</div>
+<div id="panel"><button id="close">Cerrar ✕</button><div id="panelcontent"></div></div>
+<script>
+'use strict';
+const canvas=document.getElementById('game'),ctx=canvas.getContext('2d'),$=id=>document.getElementById(id);
+const W=720,H=1280;
+let state={
+ money:0,day:1,rep:1,customersServed:0,player:{x:360,y:780},
+ inventory:{harina:12,levadura:2,sal:3},display:{hallulla:0,marraqueta:0,amasado:0},
+ oven:{condition:100,broken:false,upgrade:0},mixer:{upgrade:0},batch:null,selected:'hallulla',
+ customers:[],lastSpawn:0,toastUntil:0,expenses:0,revenue:0
+};
+const products={
+ hallulla:{name:'Hallulla',price:200,flour:1,salt:.12,yeast:.08,bake:6},
+ marraqueta:{name:'Marraqueta',price:250,flour:1.2,salt:.12,yeast:.1,bake:7},
+ amasado:{name:'Pan amasado',price:300,flour:1.3,salt:.14,yeast:.12,bake:8}
+};
+let move={x:0,y:0},joyOn=false,last=performance.now(),gameTime=0,near=null,toastTimer=null;
+function toast(s){$('toast').textContent=s;$('toast').style.opacity=1;clearTimeout(toastTimer);toastTimer=setTimeout(()=>$('toast').style.opacity=.35,4200)}
+function money(n){return '$'+Math.round(n).toLocaleString('es-CL')}
+function save(){try{localStorage.setItem('alfa_save_v2',JSON.stringify(state));toast('Partida guardada en este navegador.')}catch(e){toast('No se pudo guardar en este navegador.')}}
+function load(){try{let s=localStorage.getItem('alfa_save_v2');if(s){let parsed=JSON.parse(s);state={...state,...parsed,player:{...state.player,...parsed.player},inventory:{...state.inventory,...parsed.inventory},display:{...state.display,...parsed.display},oven:{...state.oven,...parsed.oven}};toast('Partida recuperada. ¡Bienvenido de vuelta!')}}catch(e){toast('No se pudo cargar la partida guardada.')}}
+function resize(){let d=Math.min(devicePixelRatio||1,2);canvas.width=innerWidth*d;canvas.height=innerHeight*d;ctx.setTransform(d,0,0,d,0,0);draw()}
+addEventListener('resize',resize);
+function layout(){let scale=Math.min(innerWidth/W,innerHeight/H);return {s:scale,ox:(innerWidth-W*scale)/2,oy:(innerHeight-H*scale)/2}}
+function worldPoint(x,y){let l=layout();return {x:(x-l.ox)/l.s,y:(y-l.oy)/l.s}}
+const stations=[{id:'meson',x:125,y:380,label:'MESÓN'},{id:'amasadora',x:285,y:380,label:'AMASADORA'},{id:'horno',x:455,y:365,label:'HORNO'},{id:'vitrina',x:615,y:380,label:'VITRINA'},{id:'bodega',x:100,y:600,label:'BODEGA'}];
+function nearest(){let best=null,dist=1e9;for(let s of stations){let d=Math.hypot(state.player.x-s.x,state.player.y-s.y);if(d<dist){dist=d;best=s}}return dist<125?best:null}
+function updateHUD(){$('money').textContent=money(state.money);$('day').textContent=state.day;$('rep').textContent=state.rep.toFixed(1);$('customers').textContent=state.customersServed;$('condition').textContent='Nivel '+(state.oven.upgrade+1)}
+function actionLabel(s){if(!s)return 'ACÉRCATE A UNA ESTACIÓN';if(s.id==='meson')return state.batch?'MESÓN OCUPADO':'PREPARAR '+products[state.selected].name.toUpperCase();
+if(s.id==='amasadora')return state.batch?.phase==='prepared'?'AMASAR':state.batch?.phase==='mixed'?'MASA LISTA':'AMASADORA';if(s.id==='horno'){if(state.batch?.phase==='baking')return 'SACAR PAN DEL HORNO';if(state.batch?.phase==='mixed')return 'INTRODUCIR AL HORNO';return 'HORNO · SIN PAN'}if(s.id==='vitrina')return state.batch?.phase==='baked'?'COLOCAR EN VITRINA':'VITRINA · '+totalDisplay()+' PANES';if(s.id==='bodega')return 'ABRIR BODEGA';return 'INTERACTUAR'}
+function totalDisplay(){return Object.values(state.display).reduce((a,b)=>a+b,0)}
+function interact(){
+ let s=nearest();if(!s)return;
+ if(s.id==='meson'){
+  if(state.batch){toast('Termina el lote actual antes de preparar otro.');return}
+  let p=products[state.selected],inv=state.inventory;
+  if(inv.harina<p.flour||inv.levadura<p.yeast||inv.sal<p.salt){toast('Faltan ingredientes. Visita la bodega.');return}
+  inv.harina-=p.flour;inv.levadura-=p.yeast;inv.sal-=p.salt;
+  state.batch={product:state.selected,phase:'shaped'};toast('Masa preparada: '+p.name+'. Llévala al horno.');
+ }else if(s.id==='amasadora'){
+  if(state.batch?.phase==='prepared'){state.batch.phase='mixed';toast('¡Masa amasada! Ahora llévala al horno.')}
+  else toast('Primero prepara los ingredientes en el mesón.');
+ }else if(s.id==='horno'){
+  if(state.oven.broken){if(state.money<150){toast('Necesitas $150 para reparar el horno.');return}state.money-=150;state.expenses+=150;state.oven.condition=Math.min(100,state.oven.condition+35);toast('Horno reparado. Estado: '+Math.round(state.oven.condition)+'%.')}
+  else if(state.batch?.phase==='shaped'){
+   let chance=(100-state.oven.condition)*.002;
+   if(Math.random()<chance){state.oven.broken=true;toast('El horno falló al encender. La masa se conserva.');}
+   else{state.batch.phase='baking';state.batch.time=0;toast('Pan dentro del horno. Vigila el dorado.');}
+  }else if(state.batch?.phase==='baking'){
+   let b=state.batch,p=products[b.product],t=b.time;
+   b.quality=t<p.bake*.5?'precocido':t<=p.bake*1.35?'perfecto':t< p.bake*1.8?'recocido':'quemado';
+   b.phase='baked';state.oven.condition=Math.max(0,state.oven.condition-2);
+   if(state.oven.condition<=0)state.oven.broken=true;
+   toast('Pan '+b.quality+'. Llévalo a la vitrina.');
+  }else toast('No hay masa lista para hornear.');
+ }else if(s.id==='vitrina'){
+  if(state.batch?.phase==='baked'){
+   let b=state.batch;if(b.quality==='quemado'){toast('El pan quemado no se puede vender. Deséchalo desde la bodega.');return}
+   state.display[b.product]++;state.batch=null;toast('Pan colocado en vitrina. ¡Llegarán clientes!');
+  }else toast('La vitrina tiene '+totalDisplay()+' panes.');
+ }else if(s.id==='bodega'){openPanel('inventory')}
+ updateHUD();
+}
+$('action').onclick=interact;
+function openPanel(which){
+ let c=$('panelcontent'),title='',body='';
+ if(which==='inventory'){
+  title='📦 Bodega e inventario';
+  body=Object.entries(state.inventory).map(([k,v])=>`<div class="panelrow"><span>${k}</span><b>${v.toFixed(2)}</b></div>`).join('');
+  body+='<p>Compra ingredientes para continuar produciendo.</p>'+[['harina','Saco de harina',100],['levadura','Levadura',50],['sal','Sal',30]].map(([k,n,p])=>`<button class="panelbtn" data-buy="${k}" data-price="${p}">Comprar ${n} · ${money(p)}</button>`).join('');
+  body+='<p>Desechar lote quemado: <button class="panelbtn" id="discard">Desechar</button></p>';
+ }else if(which==='shop'){
+  title='🛠 Taller y mejoras';
+  body=`<div class="panelrow"><span>Estado del horno</span><b>${Math.round(state.oven.condition)}%</b></div><div class="panelrow"><span>Mejora de horno</span><b>Nivel ${state.oven.upgrade+1}</b></div><p>Reparar: recupera 35 puntos por $150.</p><button class="panelbtn" id="repair">Reparar horno · $150</button><p>Mejora permanente de eficiencia: $500.</p><button class="panelbtn" id="upgrade">Mejorar horno · $500</button>`;
+ }else{
+  title='📊 Estado del negocio';
+  body=`<div class="panelrow"><span>Ventas acumuladas</span><b>${money(state.revenue)}</b></div><div class="panelrow"><span>Gastos acumulados</span><b>${money(state.expenses)}</b></div><div class="panelrow"><span>Clientes atendidos</span><b>${state.customersServed}</b></div><div class="panelrow"><span>Reputación</span><b>${state.rep.toFixed(1)} / 5</b></div><div class="panelrow"><span>Pan en vitrina</span><b>${totalDisplay()}</b></div><p>El local tiene un tamaño fijo. Tu progreso depende de mejorar su equipamiento.</p>`;
+ }
+ c.innerHTML=`<h2>${title}</h2>${body}`;
+ $('panel').style.display='block';
+ c.querySelectorAll('[data-buy]').forEach(b=>b.onclick=()=>{let k=b.dataset.buy,p=+b.dataset.price;if(state.money<p){toast('No tienes suficiente dinero.');return}state.money-=p;state.expenses+=p;state.inventory[k]+=k==='harina'?5:k==='levadura'?2:2;openPanel('inventory');updateHUD()});
+ 
+ let u=$('upgrade');if(u)u.onclick=()=>{if(state.money<500){toast('Necesitas $500.');return}state.money-=500;state.expenses+=500;state.oven.upgrade++;openPanel('shop');updateHUD();toast('¡Horno mejorado!')};
+ let mu=$('mixupgrade');if(mu)mu.onclick=()=>{if(state.money<400){toast('Necesitas $400.');return}state.money-=400;state.expenses+=400;state.mixer.upgrade++;openPanel('shop');updateHUD();toast('¡Amasadora mejorada!')};
+ let d=$('discard');if(d)d.onclick=()=>{if(state.batch?.quality==='quemado')state.batch=null;openPanel('inventory')};
+}
+document.querySelectorAll('[data-panel]').forEach(b=>b.onclick=()=>openPanel(b.dataset.panel));
+$('close').onclick=()=>$('panel').style.display='none';
+$('saveBtn').onclick=save;
+function spawnCustomer(){if(state.customers.length>=3)return;let keys=Object.keys(products).filter(k=>state.display[k]>0);let choice=keys.length?keys[Math.floor(Math.random()*keys.length)]:null;state.customers.push({x:630,y:570,target:choice,wait:32});}
+function updateCustomers(dt){
+ state.lastSpawn+=dt;if(state.lastSpawn>17){state.lastSpawn=0;spawnCustomer()}
+ for(let i=state.customers.length-1;i>=0;i--){
+  let c=state.customers[i];c.wait-=dt;
+  if(c.target&&state.display[c.target]>0){
+   c.x+=(625-c.x)*Math.min(1,dt*1.5);
+   if(Math.abs(c.x-625)<7){let p=products[c.target];state.display[c.target]--;state.money+=p.price;state.revenue+=p.price;state.customersServed++;state.rep=Math.min(5,state.rep+.03);toast('¡Cliente compró '+p.name+' por '+money(p.price)+'!');state.customers.splice(i,1);updateHUD()}
+  }else{c.x-=dt*30;if(c.wait<=0||c.x<460){state.rep=Math.max(1,state.rep-.02);state.customers.splice(i,1)}}
+ }
+}
+function rounded(x,y,w,h,r,fill,stroke){ctx.beginPath();ctx.roundRect(x,y,w,h,r);ctx.fillStyle=fill;ctx.fill();if(stroke){ctx.strokeStyle=stroke;ctx.lineWidth=3;ctx.stroke()}}
+function station(x,y,w,h,color,label){rounded(x+5,y+8,w,h,12,'#50301e');rounded(x,y,w,h,12,color,'#704b2e');ctx.fillStyle='#fff0d7';ctx.font='bold 14px system-ui';ctx.fillText(label,x+12,y+22)}
+function drawMixer(x,y,level){
+ // sombra
+ ctx.fillStyle='#0004';ctx.beginPath();ctx.ellipse(x+76,y+133,85,15,0,0,7);ctx.fill();
+ let g=ctx.createLinearGradient(x,y,x+150,y+120);g.addColorStop(0,'#d8dce0');g.addColorStop(.45,'#89949b');g.addColorStop(1,'#414b53');
+ rounded(x+8,y+42,138,83,13,g,'#303a40');
+ rounded(x+25,y+18,105,27,9,'#b7c0c5','#59646b');
+ // bowl
+ let bg=ctx.createLinearGradient(x+40,y+45,x+115,y+110);bg.addColorStop(0,'#f4f0e7');bg.addColorStop(.5,'#aeb8bd');bg.addColorStop(1,'#59656b');
+ ctx.beginPath();ctx.ellipse(x+77,y+75,43,31,0,0,7);ctx.fillStyle=bg;ctx.fill();ctx.strokeStyle='#edf0ed';ctx.lineWidth=3;ctx.stroke();
+ ctx.beginPath();ctx.ellipse(x+77,y+68,35,22,0,0,7);ctx.fillStyle='#eee2c8';ctx.fill();
+ // spiral hook
+ ctx.strokeStyle='#66747a';ctx.lineWidth=5;ctx.beginPath();ctx.moveTo(x+78,y+39);ctx.lineTo(x+78,y+62);ctx.quadraticCurveTo(x+102,y+76,x+82,y+84);ctx.stroke();
+ // motor housing and controls
+ rounded(x+105,y+8,36,48,8,'#34434a','#d4d9d8');
+ ctx.fillStyle='#e8c16f';ctx.beginPath();ctx.arc(x+123,y+28,5,0,7);ctx.fill();
+ ctx.fillStyle='#64b987';ctx.beginPath();ctx.arc(x+123,y+43,4,0,7);ctx.fill();
+ ctx.fillStyle='#fff1d7';ctx.font='bold 10px system-ui';ctx.fillText('AMASADORA',x+26,y+119);
+ if(level>0){ctx.fillStyle='#e7bd70';ctx.font='bold 11px system-ui';ctx.fillText('PRO '+level,x+105,y+137)}
+}
+function drawOven(x,y,level,isBaking){
+ ctx.fillStyle='#0004';ctx.beginPath();ctx.ellipse(x+84,y+176,95,15,0,0,7);ctx.fill();
+ let metal=ctx.createLinearGradient(x,y,x+170,y+160);metal.addColorStop(0,'#e1e4e3');metal.addColorStop(.25,'#8c999e');metal.addColorStop(.55,'#48565e');metal.addColorStop(1,'#202a30');
+ rounded(x,y+20,170,145,14,metal,'#d8dedd');
+ // top control strip
+ rounded(x+12,y+5,146,28,7,'#29343a','#aeb7b9');
+ for(let i=0;i<4;i++){ctx.fillStyle=i===0?'#6dc28a':'#d0a75d';ctx.beginPath();ctx.arc(x+28+i*22,y+19,5,0,7);ctx.fill()}
+ // oven door frame and window
+ rounded(x+18,y+43,134,98,9,'#20272b','#c4ccca');
+ let glass=ctx.createLinearGradient(x+20,y+45,x+150,y+135);glass.addColorStop(0,'#42525a');glass.addColorStop(.5,isBaking?'#d57c35':'#63757c');glass.addColorStop(1,'#1d282d');
+ rounded(x+25,y+50,120,83,6,glass,'#aeb9ba');
+ // racks and glow
+ ctx.strokeStyle='#b6c1c1';ctx.lineWidth=2;for(let yy of [75,99,121]){ctx.beginPath();ctx.moveTo(x+36,y+yy);ctx.lineTo(x+134,y+yy);ctx.stroke()}
+ if(isBaking){let glow=ctx.createRadialGradient(x+85,y+91,4,x+85,y+91,55);glow.addColorStop(0,'#ffd27a99');glow.addColorStop(1,'#f0781b00');ctx.fillStyle=glow;ctx.fillRect(x+25,y+50,120,83)}
+ // handle and feet
+ rounded(x+148,y+72,8,42,4,'#e6e8e5');for(let xx of [18,135])rounded(x+xx,y+160,17,13,4,'#283239');
+ ctx.fillStyle='#fff1d7';ctx.font='bold 11px system-ui';ctx.fillText('HORNO '+(level>0?'PRO '+level:'CLÁSICO'),x+23,y+157);
+}
+function draw(){
+ let l=layout(),w=innerWidth,h=innerHeight;ctx.clearRect(0,0,w,h);
+ let bg=ctx.createLinearGradient(0,0,0,h);bg.addColorStop(0,'#e6d2b4');bg.addColorStop(1,'#b58a61');ctx.fillStyle=bg;ctx.fillRect(0,0,w,h);
+ ctx.save();ctx.translate(l.ox,l.oy);ctx.scale(l.s,l.s);
+ // walls and polished tiled floor
+ let wall=ctx.createLinearGradient(0,175,0,240);wall.addColorStop(0,'#76513a');wall.addColorStop(1,'#3c2a20');ctx.fillStyle=wall;ctx.fillRect(0,175,W,50);
+ ctx.fillStyle='#c69a6d';ctx.fillRect(0,225,W,680);
+ for(let y=225;y<905;y+=48)for(let x=0;x<W;x+=60){ctx.fillStyle=((x/60+y/48|0)%2)?'#c99e72':'#d8b58b';ctx.fillRect(x+1,y+1,58,46);ctx.strokeStyle='#b88d62';ctx.lineWidth=1;ctx.strokeRect(x+1,y+1,58,46)}
+ // decorative wall shelf and warm pendant lamps
+ for(let x of [120,360,600]){ctx.fillStyle='#f5d99c55';ctx.beginPath();ctx.arc(x,248,45,0,7);ctx.fill();ctx.strokeStyle='#59402d';ctx.lineWidth=3;ctx.beginPath();ctx.moveTo(x,180);ctx.lineTo(x,205);ctx.stroke();ctx.fillStyle='#ffe4a6';ctx.beginPath();ctx.arc(x,211,10,0,7);ctx.fill()}
+ station(25,290,175,130,'#b77b45','MESÓN');rounded(67,340,90,35,12,'#e6cba0');
+ drawMixer(215,275,state.mixer.upgrade);
+ drawOven(400,270,state.oven.upgrade,state.batch?.phase==='baking');
+ station(570,290,130,130,'#936744','VITRINA');
+ // bread display
+ let n=0;for(let k of Object.keys(products)){for(let j=0;j<Math.min(5,state.display[k]);j++){ctx.fillStyle=['#e9bc70','#d69b4d','#b97937'][n%3];ctx.beginPath();ctx.ellipse(590+(n%3)*32,350+Math.floor(n/3)*23,12,8,0,0,7);ctx.fill();ctx.strokeStyle='#f5dca8';ctx.lineWidth=1;ctx.stroke();n++}}
+ station(45,550,125,90,'#806047','BODEGA');ctx.fillStyle='#e8d0a8';ctx.font='12px system-ui';ctx.fillText('Harina '+state.inventory.harina.toFixed(1),55,675);
+ // customer queue and people
+ for(let i=0;i<state.customers.length;i++){let c=state.customers[i];ctx.fillStyle='#0003';ctx.beginPath();ctx.ellipse(c.x,c.y+9,16,7,0,0,7);ctx.fill();ctx.fillStyle=['#b65f54','#547da0','#71935f'][i%3];ctx.beginPath();ctx.roundRect(c.x-13,c.y-3,26,28,7);ctx.fill();ctx.fillStyle='#efc49f';ctx.beginPath();ctx.arc(c.x,c.y-17,11,0,7);ctx.fill();ctx.fillStyle='#4a3024';ctx.beginPath();ctx.arc(c.x,c.y-22,11,Math.PI,7);ctx.fill()}
+ // baker
+ let p=state.player;ctx.fillStyle='#0004';ctx.beginPath();ctx.ellipse(p.x,p.y+12,24,12,0,0,7);ctx.fill();ctx.fillStyle='#47749b';ctx.beginPath();ctx.roundRect(p.x-15,p.y-4,30,29,7);ctx.fill();ctx.fillStyle='#d49b73';ctx.beginPath();ctx.arc(p.x,p.y-13,16,0,7);ctx.fill();ctx.fillStyle='#fff0d8';ctx.beginPath();ctx.arc(p.x,p.y-27,14,Math.PI,7);ctx.fill();ctx.fillRect(p.x-14,p.y-27,28,5);ctx.fillStyle='#302219';ctx.beginPath();ctx.arc(p.x-5,p.y-14,2,0,7);ctx.arc(p.x+5,p.y-14,2,0,7);ctx.fill();
+ let s=nearest();if(s){ctx.strokeStyle='#ffe28a';ctx.lineWidth=4;ctx.setLineDash([7,5]);ctx.strokeRect(s.x-90,s.y-70,180,145);ctx.setLineDash([])}
+ ctx.restore();
+}
+function loop(now){let dt=Math.min((now-last)/1000,.05);last=now;let v={...move};if(!joyOn){v.x=(keys.right?1:0)-(keys.left?1:0);v.y=(keys.down?1:0)-(keys.up?1:0)}let len=Math.hypot(v.x,v.y)||1;if(len>0){state.player.x=Math.max(25,Math.min(695,state.player.x+v.x/len*190*dt));state.player.y=Math.max(220,Math.min(850,state.player.y+v.y/len*190*dt))}
+ if(state.batch?.phase==='baking')state.batch.time+=dt;updateCustomers(dt);let s=nearest();$('action').textContent=actionLabel(s);$('action').disabled=!s;updateHUD();draw();requestAnimationFrame(loop)}
+const keys={};addEventListener('keydown',e=>{let k=e.key.toLowerCase();if(k==='arrowleft'||k==='a')keys.left=true;if(k==='arrowright'||k==='d')keys.right=true;if(k==='arrowup'||k==='w')keys.up=true;if(k==='arrowdown'||k==='s')keys.down=true});
+addEventListener('keyup',e=>{let k=e.key.toLowerCase();if(k==='arrowleft'||k==='a')keys.left=false;if(k==='arrowright'||k==='d')keys.right=false;if(k==='arrowup'||k==='w')keys.up=false;if(k==='arrowdown'||k==='s')keys.down=false});
+const joy=$('joy'),knob=$('knob');function joyMove(e){let r=joy.getBoundingClientRect(),dx=e.clientX-(r.left+r.width/2),dy=e.clientY-(r.top+r.height/2),max=r.width*.34,len=Math.hypot(dx,dy);if(len>max){dx=dx/len*max;dy=dy/len*max}move={x:dx/max,y:dy/max};knob.style.transform=`translate(${dx}px,${dy}px)`}
+joy.addEventListener('pointerdown',e=>{joyOn=true;joy.setPointerCapture(e.pointerId);joyMove(e)});joy.addEventListener('pointermove',e=>{if(joyOn)joyMove(e)});function joyEnd(){joyOn=false;move={x:0,y:0};knob.style.transform='translate(0,0)'}joy.addEventListener('pointerup',joyEnd);joy.addEventListener('pointercancel',joyEnd);
+load();resize();updateHUD();requestAnimationFrame(loop);
+</script>
+</body></html>
